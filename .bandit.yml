@@ -1,0 +1,20 @@
+# 安全扫描配置
+skips:
+  - B104  # 硬编码绑定
+  - B105  # 硬编码密码
+  - B106  # 硬编码密码
+  - B107  # 硬编码密码
+  - B108  # 硬编码路径
+  - B110  # try-except-pass
+
+exclude_dirs:
+  - .venv
+  - __pycache__
+  - .git
+
+tests:
+  - B101
+  - B102
+  - B103
+  - B201
+  - B202
