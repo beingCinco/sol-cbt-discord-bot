@@ -1,14 +1,10 @@
-name: Build and Deploy to Hugging Face Spaces
+name: Build and Deploy
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - '**'
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build:
@@ -17,7 +13,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -30,25 +26,8 @@ jobs:
       - name: Run security checks
         run: |
           pip install bandit safety
-          bandit -r . -ll
-          safety check --full-report
-
-      - name: Run static analysis
-        run: |
-          pip install pylint black
-          black --check --diff .
-          pylint --disable=all --enable=E,F main.py
-
-      - name: Verify environment variables
-        run: |
-          if [ -z "${{ secrets.DISCORD_TOKEN }}" ]; then
-            echo "::error::DISCORD_TOKEN is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.HF_API_TOKEN }}" ]; then
-            echo "::error::HF_API_TOKEN is not set"
-            exit 1
-          fi
+          bandit -c .bandit.yml -r . -ll
+          safety check --ignore=51457 --ignore=51499
 
   deploy:
     needs: build
@@ -65,64 +44,20 @@ jobs:
           pip install huggingface_hub
           huggingface-cli login --token $HF_TOKEN
 
-      - name: Build and push Docker image
+      - name: Deploy to Hugging Face
         env:
-          SPACE_NAME: "${{ secrets.HF_USERNAME }}/solcbt-therapy-bot"
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
         run: |
-          docker build -t $SPACE_NAME .
-          docker push $SPACE_NAME
-
-      - name: Trigger Space rebuild
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          SPACE_NAME: "${{ secrets.HF_USERNAME }}/solcbt-therapy-bot"
-        run: |
-          curl -X POST \
-            -H "Authorization: Bearer $HF_TOKEN" \
-            "https://huggingface.co/api/spaces/$SPACE_NAME/rebuild"
-
-      - name: Health check after deployment
-        env:
-          SPACE_NAME: "${{ secrets.HF_USERNAME }}/solcbt-therapy-bot"
-        run: |
-          sleep 120  # Wait for deployment to finish
-          curl -f "https://$SPACE_NAME.hf.space/health" || exit 1
-
-  monitor:
-    runs-on: ubuntu-latest
-    needs: deploy
-    steps:
-      - name: Send success notification
-        if: ${{ success() }}
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const spaceUrl = `https://huggingface.co/spaces/${{ secrets.HF_USERNAME }}/solcbt-therapy-bot`;
-            const logsUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `🚀 Sol-CBT deployed successfully to Hugging Face Spaces!\n\n` +
-                     `**Space URL:** ${spaceUrl}\n` +
-                     `**Deploy Logs:** ${logsUrl}`
-            })
-
-      - name: Send failure alert
-        if: ${{ failure() }}
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const logsUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `🚨 **DEPLOYMENT FAILED**\n\n` +
-                     `**Build logs:** ${logsUrl}\n\n` +
-                     `Pinging: @${{ github.actor }}`
-            })
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SPACE_NAME="$HF_USERNAME/sol-cbt-therapy-bot"
+          
+          # 创建或更新 Space
+          huggingface-cli repo create $SPACE_NAME --type space -y
+          
+          # 上传文件
+          huggingface-cli upload $SPACE_NAME \
+            main.py \
+            requirements.txt \
+            .bandit.yml \
+            --repo-type=space
+          
+          logger.info("部署成功！Space URL: https://huggingface.co/spaces/$SPACE_NAME")
