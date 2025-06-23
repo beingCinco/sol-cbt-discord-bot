@@ -1,4 +1,3 @@
-# .github/workflows/run.yml
 name: Build and Deploy to Hugging Face Spaces
 
 on:
@@ -67,55 +66,63 @@ jobs:
           huggingface-cli login --token $HF_TOKEN
 
       - name: Build and push Docker image
+        env:
+          SPACE_NAME: "${{ secrets.HF_USERNAME }}/solcbt-therapy-bot"
         run: |
-          SPACE_NAME="your-hf-username/solcbt-therapy-bot"
           docker build -t $SPACE_NAME .
           docker push $SPACE_NAME
 
       - name: Trigger Space rebuild
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SPACE_NAME: "${{ secrets.HF_USERNAME }}/solcbt-therapy-bot"
         run: |
           curl -X POST \
             -H "Authorization: Bearer $HF_TOKEN" \
             "https://huggingface.co/api/spaces/$SPACE_NAME/rebuild"
 
       - name: Health check after deployment
+        env:
+          SPACE_NAME: "${{ secrets.HF_USERNAME }}/solcbt-therapy-bot"
         run: |
           sleep 120  # Wait for deployment to finish
-          curl -f https://$SPACE_NAME.hf.space/health || exit 1
+          curl -f "https://$SPACE_NAME.hf.space/health" || exit 1
 
   monitor:
     runs-on: ubuntu-latest
     needs: deploy
     steps:
       - name: Send success notification
-        if: success()
+        if: ${{ success() }}
         uses: actions/github-script@v6
         with:
           script: |
+            const spaceUrl = `https://huggingface.co/spaces/${{ secrets.HF_USERNAME }}/solcbt-therapy-bot`;
+            const logsUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '🚀 Sol-CBT deployed successfully to Hugging Face Spaces!\n\n' +
-                     '**Space URL:** https://huggingface.co/spaces/${{ secrets.HF_USERNAME }}/solcbt-therapy-bot\n' +
-                     '**Deploy Logs:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+              body: `🚀 Sol-CBT deployed successfully to Hugging Face Spaces!\n\n` +
+                     `**Space URL:** ${spaceUrl}\n` +
+                     `**Deploy Logs:** ${logsUrl}`
             })
 
       - name: Send failure alert
-        if: failure()
+        if: ${{ failure() }}
         uses: actions/github-script@v6
         with:
           script: |
+            const logsUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '🚨 **DEPLOYMENT FAILED**\n\n' +
-                     '**Error in step:** ${{ failure() }}\n' +
-                     '**Build logs:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n' +
-                     'Pinging: @${{ github.actor }}'
+              body: `🚨 **DEPLOYMENT FAILED**\n\n` +
+                     `**Build logs:** ${logsUrl}\n\n` +
+                     `Pinging: @${{ github.actor }}`
             })
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
