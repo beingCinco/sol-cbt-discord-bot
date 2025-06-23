@@ -6,6 +6,11 @@ jobs:
     runs-on: ubuntu-latest  # 使用最新Ubuntu系统
     
     steps:
+    - name: Test Discord connectivity
+  run: |
+    nc -zv discord.com 443
+    ping -c 4 discord.com
+    
     # 步骤1：检出代码
     - name: Checkout repository
       uses: actions/checkout@v4
