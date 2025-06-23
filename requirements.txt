@@ -1,4 +1,7 @@
-discord.py==2.3.2
+discord.py==2.4.1
 requests==2.31.0
 Flask==3.0.2
 python-dotenv==1.0.0
+langdetect==1.0.9
+huggingface_hub==0.22.2
+pip-audit==2.6.1
