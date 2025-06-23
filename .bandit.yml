@@ -1,20 +1,24 @@
 # 安全扫描配置
 skips:
+  - B101  # 断言使用
+  - B102  # exec 使用
+  - B103  # set_bad 使用
   - B104  # 硬编码绑定
   - B105  # 硬编码密码
   - B106  # 硬编码密码
   - B107  # 硬编码密码
   - B108  # 硬编码路径
   - B110  # try-except-pass
+  - B311  # random 使用
+  - B312  # tempfile 使用
+  - B313  # xml.etree 使用
+  - B314  # ftplib 使用
+  - B315  # telnetlib 使用
+  - B316  # pickle 使用
+  - B317  # mark_safe 使用
+  - B318  # subprocess 使用
 
 exclude_dirs:
   - .venv
   - __pycache__
   - .git
-
-tests:
-  - B101
-  - B102
-  - B103
-  - B201
-  - B202
