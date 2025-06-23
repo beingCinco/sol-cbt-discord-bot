@@ -1,0 +1,7 @@
+import discord
+    from dotenv import load_dotenv
+    import requests
+    print("✅ All packages installed successfully!")
+    print(f"discord.py version: {discord.__version__}")
+except ImportError as e:
+    print(f"❌ Missing package: {e.name}")
