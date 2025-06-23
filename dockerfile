@@ -1,20 +1,29 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-# 安全设置
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-ENV PIP_NO_CACHE_DIR off
+# 设置时区
+ENV TZ=UTC
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# 创建非root用户
-RUN groupadd -r sol && useradd -r -g sol sol
-USER sol
+# 安装必要的系统工具
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --chown=sol:sol . .
 
-# 安全安装依赖
-RUN pip install --user --no-cache-dir -r requirements.txt
+# 设置无缓冲输出
+ENV PYTHONUNBUFFERED=1
 
+# 安装依赖
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 复制应用代码
+COPY . .
+
+# 暴露端口
 EXPOSE 7860
 
+# 启动命令
 CMD ["python", "main.py"]
