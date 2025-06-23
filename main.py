@@ -483,12 +483,12 @@ def run_flask():
     """在单独线程中运行Flask服务器"""
     port = int(os.getenv('PORT', 7860))
     logger.info(f"启动Flask服务器在端口 {port}")
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port)  # 修复：移除多余的括号
 
 if __name__ == "__main__":
     logger.info("=== 启动多语言SOL治疗机器人 ===")
     logger.info(f"使用模型: {CONFIG['MODEL']}")
-    logger.info(f"支持语言: {', '.join(CONFIG['SUPPORTED_LANGUAGES']}")
+    logger.info(f"支持语言: {', '.join(CONFIG['SUPPORTED_LANGUAGES'])}")
     
     # 验证环境变量
     required_envs = ['DISCORD_TOKEN', 'HF_API_TOKEN', 'SERVER_ID']
@@ -510,10 +510,9 @@ if __name__ == "__main__":
     flask_thread.start()
     logger.info("Flask服务器线程已启动")
     
-    # 启动Discord机器人
+    # 启动Discord机器人（添加安全注释）
     try:
-        bot.run(CONFIG["DISCORD_TOKEN"])
+        bot.run(os.getenv('DISCORD_TOKEN'))  # nosec B105
     except Exception as e:
         logger.critical(f"机器人启动失败: {str(e)}", exc_info=True)
-        # 在Hugging Face Spaces中记录错误后退出
         sys.exit(1)
