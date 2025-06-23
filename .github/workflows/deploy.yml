@@ -9,17 +9,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Setup Hugging Face CLI
-        run: pip install huggingface_hub
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-      - name: Login to Hugging Face
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub
+
+      - name: Configure Hugging Face CLI
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: huggingface-cli login --token $HF_TOKEN
+        run: |
+          huggingface-cli login --token $HF_TOKEN
 
-      - name: Deploy to Space
+      - name: Prepare Dockerfile
+        run: |
+          cat << EOF > Dockerfile
+          FROM python:3.10-slim
+          
+          WORKDIR /app
+          
+          COPY requirements.txt .
+          RUN pip install --no-cache-dir -r requirements.txt
+          
+          COPY . .
+          
+          CMD ["python", "main.py"]
+          EOF
+          
+          cat Dockerfile
+
+      - name: Deploy to Hugging Face Space
         env:
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
@@ -29,18 +54,16 @@ jobs:
           # 设置空间名称
           SPACE_NAME="$HF_USERNAME/solcbt-therapy-bot"
           
-          # 克隆空间仓库
-          huggingface-cli repo create $SPACE_NAME --repo-type space --space-sdk docker --exist-ok
-          git clone https://huggingface.co/spaces/$SPACE_NAME
-          cd $SPACE_NAME
+          # 创建或更新Space
+          huggingface-cli repo create $SPACE_NAME --type space --space-sdk docker --exist-ok
           
-          # 复制GitHub仓库内容
-          cp -r $GITHUB_WORKSPACE/* .
-          
-          # 提交更改
-          git add .
-          git commit -m "Deploy from GitHub Actions"
-          git push
+          # 上传必要文件
+          huggingface-cli upload $SPACE_NAME \
+            main.py \
+            requirements.txt \
+            Dockerfile \
+            --repo-type space \
+            --commit-message "Deploy from GitHub Actions"
           
           # 设置环境变量
           huggingface-cli space config set $SPACE_NAME \
@@ -50,3 +73,5 @@ jobs:
           
           # 重启空间
           huggingface-cli space restart $SPACE_NAME
+          
+          echo "Deployed to: https://huggingface.co/spaces/$SPACE_NAME"
