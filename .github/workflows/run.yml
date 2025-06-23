@@ -1,50 +1,121 @@
-- name: Test Discord WebSocket
-  run: |
-    # 安装Python依赖
-    pip install websockets
-    
-    # 创建测试脚本
-    cat > test_ws.py <<EOF
-    import asyncio
-    import websockets
-    import sys
-    
-    async def test_connection():
-        try:
-            async with websockets.connect('wss://gateway.discord.gg') as ws:
-                print("WebSocket connection SUCCESS")
-                return 0
-        except Exception as e:
-            print(f"WebSocket connection FAILED: {str(e)}")
-            return 1
-    
-    exit_code = asyncio.run(test_connection())
-    sys.exit(exit_code)
-    EOF
-    
-    # 执行测试
-    python test_ws.py
-    - name: Run Sol Bot (with proxy)
-  env:
-    DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-    HF_API_KEY: ${{ secrets.HF_API_KEY }}
-    SERVER_ID: ${{ secrets.SERVER_ID }}
-    # 使用Cloudflare Warp代理
-    WARP_ENABLED: "true"
-    run: |
-    # 安装Cloudflare Warp
-    curl https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-    sudo apt update && sudo apt install -y cloudflare-warp
-    
-    # 注册并连接
-    warp-cli register
-    warp-cli set-mode proxy
-    warp-cli connect
-    
-    # 设置代理环境变量
-    export http_proxy=http://127.0.0.1:40000
-    export https_proxy=http://127.0.0.1:40000
-    
-    # 运行bot
-    python main.py
+# .github/workflows/run.yml
+name: Build and Deploy to Hugging Face Spaces
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run security checks
+        run: |
+          pip install bandit safety
+          bandit -r . -ll
+          safety check --full-report
+
+      - name: Run static analysis
+        run: |
+          pip install pylint black
+          black --check --diff .
+          pylint --disable=all --enable=E,F main.py
+
+      - name: Verify environment variables
+        run: |
+          if [ -z "${{ secrets.DISCORD_TOKEN }}" ]; then
+            echo "::error::DISCORD_TOKEN is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.HF_API_TOKEN }}" ]; then
+            echo "::error::HF_API_TOKEN is not set"
+            exit 1
+          fi
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Hugging Face CLI
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install huggingface_hub
+          huggingface-cli login --token $HF_TOKEN
+
+      - name: Build and push Docker image
+        run: |
+          SPACE_NAME="your-hf-username/solcbt-therapy-bot"
+          docker build -t $SPACE_NAME .
+          docker push $SPACE_NAME
+
+      - name: Trigger Space rebuild
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer $HF_TOKEN" \
+            "https://huggingface.co/api/spaces/$SPACE_NAME/rebuild"
+
+      - name: Health check after deployment
+        run: |
+          sleep 120  # Wait for deployment to finish
+          curl -f https://$SPACE_NAME.hf.space/health || exit 1
+
+  monitor:
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Send success notification
+        if: success()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🚀 Sol-CBT deployed successfully to Hugging Face Spaces!\n\n' +
+                     '**Space URL:** https://huggingface.co/spaces/${{ secrets.HF_USERNAME }}/solcbt-therapy-bot\n' +
+                     '**Deploy Logs:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            })
+
+      - name: Send failure alert
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🚨 **DEPLOYMENT FAILED**\n\n' +
+                     '**Error in step:** ${{ failure() }}\n' +
+                     '**Build logs:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n' +
+                     'Pinging: @${{ github.actor }}'
+            })
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
