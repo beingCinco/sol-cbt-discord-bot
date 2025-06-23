@@ -1,40 +1,50 @@
-name: Launch Sol Bot
-on: [push]  # 每次推送代码时触发
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest  # 使用最新Ubuntu系统
+- name: Test Discord WebSocket
+  run: |
+    # 安装Python依赖
+    pip install websockets
     
-    steps:
-    - name: Test Discord connectivity
-      run: |
-          nc -zv discord.com 443
-          ping -c 4 discord.com
+    # 创建测试脚本
+    cat > test_ws.py <<EOF
+    import asyncio
+    import websockets
+    import sys
     
-    # 步骤1：检出代码
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    # 步骤2：设置Python环境
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'  # 与runtime.txt一致
-        
-    # 步骤3：安装依赖
-    - name: Install dependencies
-      run: pip install -r requirements.txt
-      
-    # 步骤4：运行Discord机器人
-    - name: Run Sol Bot
-      env:  # 注入环境变量
-        DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-        HF_API_KEY: ${{ secrets.HF_API_KEY }}
-        SERVER_ID: ${{ secrets.SERVER_ID }}
-      run: |
-        # 启动后台进程
-        nohup python main.py > bot.log 2>&1 &
-        
-        # 保持进程运行（60分钟）
-        echo "Bot will run for 60 minutes"
-        sleep 3600
+    async def test_connection():
+        try:
+            async with websockets.connect('wss://gateway.discord.gg') as ws:
+                print("WebSocket connection SUCCESS")
+                return 0
+        except Exception as e:
+            print(f"WebSocket connection FAILED: {str(e)}")
+            return 1
+    
+    exit_code = asyncio.run(test_connection())
+    sys.exit(exit_code)
+    EOF
+    
+    # 执行测试
+    python test_ws.py
+    - name: Run Sol Bot (with proxy)
+  env:
+    DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+    HF_API_KEY: ${{ secrets.HF_API_KEY }}
+    SERVER_ID: ${{ secrets.SERVER_ID }}
+    # 使用Cloudflare Warp代理
+    WARP_ENABLED: "true"
+    run: |
+    # 安装Cloudflare Warp
+    curl https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+    sudo apt update && sudo apt install -y cloudflare-warp
+    
+    # 注册并连接
+    warp-cli register
+    warp-cli set-mode proxy
+    warp-cli connect
+    
+    # 设置代理环境变量
+    export http_proxy=http://127.0.0.1:40000
+    export https_proxy=http://127.0.0.1:40000
+    
+    # 运行bot
+    python main.py
