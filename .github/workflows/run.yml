@@ -7,9 +7,9 @@ jobs:
     
     steps:
     - name: Test Discord connectivity
-  run: |
-    nc -zv discord.com 443
-    ping -c 4 discord.com
+      run: |
+          nc -zv discord.com 443
+          ping -c 4 discord.com
     
     # 步骤1：检出代码
     - name: Checkout repository
