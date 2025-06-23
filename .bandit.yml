@@ -1,6 +1,6 @@
-# 安全扫描配置
+# .bandit.yml
 skips:
-  - B101  # 断言使用
+  - B101  # assert 使用
   - B102  # exec 使用
   - B103  # set_bad 使用
   - B104  # 硬编码绑定
@@ -22,3 +22,6 @@ exclude_dirs:
   - .venv
   - __pycache__
   - .git
+
+targets:
+  - main.py
