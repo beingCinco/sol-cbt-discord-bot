@@ -47,7 +47,7 @@ ERROR_TRANSLATIONS = {
 # ===== HARDCODED CONFIGURATION =====
 CONFIG = {
     "DISCORD_TOKEN": "DISCORD_TOKEN",
-    "SERVER_ID": 1084144729932976168,
+    "SERVER_ID": "SERVER_ID",
     "HF_API_KEY": "HF_API_KEY",   
     "MODEL": "mistralai/Mixtral-8x7B-Instruct-v0.1",
     "CRISIS_KEYWORDS": ["suicide", "self-harm", "kill myself", "end it all"],
