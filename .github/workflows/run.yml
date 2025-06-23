@@ -1,0 +1,35 @@
+name: Launch Sol Bot
+on: [push]  # 每次推送代码时触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest  # 使用最新Ubuntu系统
+    
+    steps:
+    # 步骤1：检出代码
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    # 步骤2：设置Python环境
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'  # 与runtime.txt一致
+        
+    # 步骤3：安装依赖
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+      
+    # 步骤4：运行Discord机器人
+    - name: Run Sol Bot
+      env:  # 注入环境变量
+        DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        HF_API_KEY: ${{ secrets.HF_API_KEY }}
+        SERVER_ID: ${{ secrets.SERVER_ID }}
+      run: |
+        # 启动后台进程
+        nohup python main.py > bot.log 2>&1 &
+        
+        # 保持进程运行（60分钟）
+        echo "Bot will run for 60 minutes"
+        sleep 3600
