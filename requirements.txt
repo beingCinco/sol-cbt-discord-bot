@@ -1,4 +1,6 @@
 discord.py>=2.3.2
+transformers
+torch
 requests
 python-dotenv
 flask
