@@ -422,6 +422,26 @@ async def sol_command(interaction: discord.Interaction, issue: str):
     except Exception as e:
         logger.error(f"Command error: {str(e)}", exc_info=True)
         await interaction.followup.send(f"🌧️ Something went wrong: {str(e)}", ephemeral=True)
+    import os
+    import threading
+    from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Sol-CBT Bot Running", 200
+
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 7860)))
+
+# 在 bot.run() 前添加
+flask_thread = threading.Thread(target=run_flask)
+flask_thread.daemon = True
+flask_thread.start()
+
+# 启动 Discord Bot
+bot.run(os.getenv('DISCORD_TOKEN'))
         
 logger.info("=== BOT STARTING ===")
 # ===== START BOT =====
