@@ -8,7 +8,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -17,32 +17,47 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install huggingface_hub
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub
 
       - name: Configure Hugging Face CLI
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}  # 使用您获取的令牌
-        run: huggingface-cli login --token $HF_TOKEN
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli login --token $HF_TOKEN
 
-      - name: Deploy to Hugging Face
+      - name: Deploy to Hugging Face Space
         env:
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          HF_API_TOKEN: ${{ secrets.HF_API_TOKEN }}
+          SERVER_ID: ${{ secrets.SERVER_ID }}
         run: |
+          # 设置空间名称
           SPACE_NAME="$HF_USERNAME/sol-cbt-therapy-bot"
           
-          # 创建或更新Space
-          huggingface-cli repo create $SPACE_NAME --type space -y
+          # 1. 创建或更新Space (指定SDK类型为docker)
+          huggingface-cli repo create $SPACE_NAME \
+            --repo-type space \
+            --space-sdk docker \
+            --exist-ok
           
-          # 上传文件
+          # 2. 上传必要文件
           huggingface-cli upload $SPACE_NAME \
             main.py \
             requirements.txt \
-            --repo-type=space
+            --repo-type=space \
+            --commit-message "Deploy via GitHub Actions"
           
-          # 设置环境变量
+          # 3. 设置环境变量
           huggingface-cli space config set $SPACE_NAME \
-            --env DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }} \
-            --env HF_API_TOKEN=${{ secrets.HF_API_TOKEN }} \
-            --env SERVER_ID=${{ secrets.SERVER_ID }}
-
+            --env "DISCORD_TOKEN=$DISCORD_TOKEN" \
+            --env "HF_API_TOKEN=$HF_API_TOKEN" \
+            --env "SERVER_ID=$SERVER_ID"
+          
+          # 4. 启动空间构建
+          echo "Triggering Space build..."
+          huggingface-cli space restart $SPACE_NAME
+          
           echo "Deployed to: https://huggingface.co/spaces/$SPACE_NAME"
