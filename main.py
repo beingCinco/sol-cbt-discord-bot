@@ -8,8 +8,9 @@ from datetime import datetime, timedelta
 import random
 import langdetect
 import threading
-from flask import Flask, request
+from flask import Flask
 import sys
+import asyncio
 
 # ===== 新增 Flask 服务器设置 =====
 app = Flask(__name__)
@@ -22,9 +23,10 @@ def home():
 @app.route('/health')
 def health_check():
     """详细的健康检查端点"""
+    bot_status = "online" if bot.is_ready() else "offline"
     return {
         "status": "running",
-        "bot": "online" if bot.is_ready() else "offline",
+        "bot": bot_status,
         "memory_sessions": len(memory.sessions),
         "last_cleanup": str(memory.last_cleanup)
     }, 200
@@ -66,13 +68,18 @@ logging.basicConfig(
         logging.FileHandler('debug.log')
     ]
 )
-logger = logging.getLogger('discord')
+logger = logging.getLogger('sol-therapy-bot')
 
 # ===== 配置从环境变量获取 =====
+# 获取环境变量或使用默认值（用于本地测试）
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', 'YOUR_DISCORD_TOKEN')
+SERVER_ID = os.getenv('SERVER_ID', 'YOUR_SERVER_ID')
+HF_API_KEY = os.getenv('HF_API_TOKEN', 'YOUR_HF_API_TOKEN')
+
 CONFIG = {
-    "DISCORD_TOKEN": os.getenv('DISCORD_TOKEN', 'default_token'),
-    "SERVER_ID": os.getenv('SERVER_ID', 'default_server'),
-    "HF_API_KEY": os.getenv('HF_API_TOKEN', 'default_api_key'),   
+    "DISCORD_TOKEN": DISCORD_TOKEN,
+    "SERVER_ID": SERVER_ID,
+    "HF_API_KEY": HF_API_KEY,   
     "MODEL": "mistralai/Mixtral-8x7B-Instruct-v0.1",
     "CRISIS_KEYWORDS": ["suicide", "self-harm", "kill myself", "end it all"],
     "MEMORY_DURATION": 24,
@@ -94,7 +101,7 @@ ERROR_TRANSLATIONS = {
         )
     },
     'fr': {
-        'processing': "🤔 J'ai besoin d'un moment pour traiter cela. Pourriez-vous reformuler ou ajouter plus de contexte?",
+        'processing': "🤔 J'ai besoin d'un moment pour traiter cela. Pourriez-vous reformular o añadir más contexto?",
         'error': "⚠️ Mes pensées sont embrouillées en ce moment. Pourrions-nous réessayer?",
         'crisis': (
             "🚨 Je suis préoccupé par ce que vous partagez. Veuillez contacter immédiatement :\n"
@@ -178,7 +185,7 @@ def detect_language(text: str) -> str:
                 if lang in CONFIG["SUPPORTED_LANGUAGES"]:
                     return lang
             except:
-                pass
+                continue
     except Exception as e:
         logger.error(f"语言检测错误: {str(e)}")
 
@@ -388,9 +395,9 @@ def get_therapeutic_response(history: list, detected_lang: str) -> str:
 async def on_ready():
     logger.info(f"✅ 登录为 {bot.user}")
     try:
-        server_id = discord.Object(id=CONFIG["SERVER_ID"])
-        synced = await tree.sync(guild=server_id)
-        logger.info(f"🌿 同步 {len(synced)} 个命令")
+        server = discord.Object(id=int(CONFIG["SERVER_ID"]))
+        await tree.sync(guild=server)
+        logger.info(f"🌿 命令同步完成")
     except Exception as e:
         logger.error(f"❌ 命令同步失败: {str(e)}")
     logger.info("🌿 机器人已就绪！")
@@ -483,7 +490,16 @@ def run_flask():
     """在单独线程中运行Flask服务器"""
     port = int(os.getenv('PORT', 7860))
     logger.info(f"启动Flask服务器在端口 {port}")
-    app.run(host='0.0.0.0', port=port)  # 修复：移除多余的括号
+    app.run(host='0.0.0.0', port=port)
+
+def run_discord_bot():
+    """运行Discord机器人"""
+    logger.info("启动Discord机器人")
+    try:
+        bot.run(CONFIG["DISCORD_TOKEN"])
+    except Exception as e:
+        logger.critical(f"机器人启动失败: {str(e)}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     logger.info("=== 启动多语言SOL治疗机器人 ===")
@@ -496,7 +512,10 @@ if __name__ == "__main__":
     
     if missing:
         logger.error(f"缺少关键环境变量: {', '.join(missing)}")
-        sys.exit(1)
+        # 尝试使用CONFIG中的值
+        if not CONFIG["DISCORD_TOKEN"] or CONFIG["DISCORD_TOKEN"] == 'YOUR_DISCORD_TOKEN':
+            logger.critical("未设置DISCORD_TOKEN，机器人无法启动")
+            sys.exit(1)
     
     # 启动keep-alive线程
     keep_alive_thread = threading.Thread(target=keep_alive)
@@ -510,9 +529,16 @@ if __name__ == "__main__":
     flask_thread.start()
     logger.info("Flask服务器线程已启动")
     
-    # 启动Discord机器人（添加安全注释）
+    # 在单独线程中启动Discord机器人
+    discord_thread = threading.Thread(target=run_discord_bot)
+    discord_thread.daemon = True
+    discord_thread.start()
+    logger.info("Discord机器人线程已启动")
+    
+    # 保持主线程运行
     try:
-        bot.run(os.getenv('DISCORD_TOKEN'))  # nosec B105
-    except Exception as e:
-        logger.critical(f"机器人启动失败: {str(e)}", exc_info=True)
-        sys.exit(1)
+        while True:
+            time.sleep(3600)  # 每小时检查一次
+    except KeyboardInterrupt:
+        logger.info("收到中断信号，关闭机器人")
+        sys.exit(0)
