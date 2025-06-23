@@ -1,6 +1,5 @@
 import os
 import discord
-import requests
 import logging
 from flask import Flask
 import threading
@@ -14,12 +13,11 @@ logger = logging.getLogger('sol-therapy-bot')
 
 # 环境变量
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-HF_API_TOKEN = os.getenv('HF_API_TOKEN')
 SERVER_ID = os.getenv('SERVER_ID')
 
 # 验证环境变量
-if not DISCORD_TOKEN or not HF_API_TOKEN or not SERVER_ID:
-    logger.error("缺少必要的环境变量")
+if not DISCORD_TOKEN or not SERVER_ID:
+    logger.error("Missing required environment variables")
     exit(1)
 
 # Flask 应用
@@ -40,16 +38,15 @@ bot = discord.Client(intents=intents)
 
 @bot.event
 async def on_ready():
-    logger.info(f"✅ 登录为 {bot.user}")
+    logger.info(f"Logged in as {bot.user}")
 
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
     
-    # 简单响应测试
     if bot.user.mentioned_in(message):
-        await message.channel.send(f"你好 {message.author.mention}！我正在运行 :)")
+        await message.channel.send(f"Hello {message.author.mention}! I'm running :)")
 
 # 线程函数
 def run_flask():
@@ -59,15 +56,15 @@ def run_bot():
     bot.run(DISCORD_TOKEN)
 
 if __name__ == "__main__":
-    logger.info("=== 启动 SOL 治疗机器人 ===")
+    logger.info("=== Starting SOL Therapy Bot ===")
     
     # 启动 Flask 线程
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    logger.info("Flask 服务器已启动")
+    logger.info("Flask server started")
     
     # 启动 Discord 机器人
     try:
         run_bot()
     except Exception as e:
-        logger.critical(f"机器人启动失败: {str(e)}")
+        logger.critical(f"Bot startup failed: {str(e)}")
