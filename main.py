@@ -7,7 +7,57 @@ import logging
 from datetime import datetime, timedelta
 import random
 import langdetect
-import logging
+import threading
+from flask import Flask, request
+import sys
+
+# ===== 新增 Flask 服务器设置 =====
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    """健康检查端点"""
+    return "Sol-CBT Bot Running", 200
+
+@app.route('/health')
+def health_check():
+    """详细的健康检查端点"""
+    return {
+        "status": "running",
+        "bot": "online" if bot.is_ready() else "offline",
+        "memory_sessions": len(memory.sessions),
+        "last_cleanup": str(memory.last_cleanup)
+    }, 200
+
+@app.route('/logs')
+def view_logs():
+    """查看最近的日志"""
+    try:
+        with open('debug.log', 'r') as f:
+            logs = f.read()
+        return f"<pre>{logs}</pre>", 200
+    except Exception as e:
+        return f"Error reading logs: {str(e)}", 500
+
+# ===== 新增 Keep-Alive 机制 =====
+def keep_alive():
+    """防止 Hugging Face 容器休眠"""
+    while True:
+        try:
+            # 获取 Space 名称（在 Hugging Face Spaces 中自动设置）
+            space_name = os.getenv('SPACE_NAME', 'default-space')
+            space_url = f"https://{space_name}.hf.space"
+            
+            # 同时调用健康检查端点
+            requests.get(space_url)
+            requests.get(f"{space_url}/health")
+            
+            logger.info(f"Keep-alive request sent to {space_url}")
+        except Exception as e:
+            logger.error(f"Keep-alive error: {str(e)}")
+        time.sleep(300)  # 每 5 分钟唤醒一次
+
+# ===== 日志配置 =====
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -18,7 +68,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger('discord')
 
-# ===== LANGUAGE CONFIGURATION =====
+# ===== 配置从环境变量获取 =====
+CONFIG = {
+    "DISCORD_TOKEN": os.getenv('DISCORD_TOKEN', 'default_token'),
+    "SERVER_ID": os.getenv('SERVER_ID', 'default_server'),
+    "HF_API_KEY": os.getenv('HF_API_TOKEN', 'default_api_key'),   
+    "MODEL": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+    "CRISIS_KEYWORDS": ["suicide", "self-harm", "kill myself", "end it all"],
+    "MEMORY_DURATION": 24,
+    "MAX_HISTORY": 6,
+    "SUPPORTED_LANGUAGES": ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja']
+}
+
+# ===== 语言配置 =====
 LANGUAGE_INSTRUCTION = "\n\nRespond in the same language as the user's message."
 ERROR_TRANSLATIONS = {
     'es': {
@@ -51,22 +113,10 @@ ERROR_TRANSLATIONS = {
             "• Deine örtlichen Notdienste"
         )
     },
-    # Add more languages as needed
+    # 其他语言...
 }
 
-# ===== HARDCODED CONFIGURATION =====
-CONFIG = {
-    "DISCORD_TOKEN": "DISCORD_TOKEN",
-    "SERVER_ID": "SERVER_ID",
-    "HF_API_KEY": "HF_API_KEY",   
-    "MODEL": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-    "CRISIS_KEYWORDS": ["suicide", "self-harm", "kill myself", "end it all"],
-    "MEMORY_DURATION": 24,
-    "MAX_HISTORY": 6,
-    "SUPPORTED_LANGUAGES": ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja']
-}
-
-# ===== ENHANCED THERAPEUTIC PROMPTS =====
+# ===== 治疗提示 =====
 INITIAL_SYSTEM_PROMPT = """You are Sol, a compassionate therapist specializing in relationship dynamics. 
 Respond naturally using these therapeutic elements:
 1. VALIDATION: Acknowledge their feelings ("That sounds really tough...")
@@ -82,7 +132,7 @@ FOLLOW_UP_SYSTEM_PROMPT = """Continue as Sol in an ongoing therapy conversation.
 - Suggesting micro-actions based on the dialogue
 Respond in 1-2 sentences maximum, keeping it conversational."""
 
-# ===== THERAPIST PERSONA ELEMENTS =====
+# ===== 治疗师人格元素 =====
 EMPATHY_MARKERS = [
     "Hmm, that sounds really challenging...",
     "Oh, I can sense the weight of that...",
@@ -107,28 +157,21 @@ ACTION_FRAMING = [
     "Consider trying this small step..."
 ]
 
-# ===== LOGGING SETUP =====
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('sol-therapy-bot')
-
-# ===== DISCORD BOT SETUP =====
+# ===== Discord 机器人设置 =====
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# ===== LANGUAGE DETECTION =====
+# ===== 语言检测 =====
 def detect_language(text: str) -> str:
-    """Robust language detection with validation"""
+    """鲁棒的语言检测"""
     if not text.strip():
         return 'en'
 
     try:
-        # Try detection up to 3 times for reliability
+        # 尝试多次检测以提高可靠性
         for _ in range(3):
             try:
                 lang = langdetect.detect(text)
@@ -137,11 +180,11 @@ def detect_language(text: str) -> str:
             except:
                 pass
     except Exception as e:
-        logger.error(f"Language detection error: {str(e)}")
+        logger.error(f"语言检测错误: {str(e)}")
 
     return 'en'
 
-# ===== CONVERSATION MEMORY SYSTEM =====
+# ===== 对话记忆系统 =====
 class ConversationMemory:
     def __init__(self):
         self.sessions = {}
@@ -175,14 +218,14 @@ class ConversationMemory:
             {"role": "assistant", "content": ai_response}
         ])
 
-        # Trim history while preserving system message
+        # 修剪历史记录，保留系统消息
         if len(session["history"]) > CONFIG["MAX_HISTORY"] * 2 + 2:
             session["history"] = [session["history"][0]] + session["history"][-CONFIG["MAX_HISTORY"] * 2:]
 
         session["last_active"] = datetime.now()
         session["message_count"] += 1
 
-        # Switch to follow-up mode after first response
+        # 第一次响应后切换到后续模式
         if session["message_count"] == 1:
             follow_up_prompt = FOLLOW_UP_SYSTEM_PROMPT + LANGUAGE_INSTRUCTION
             session["history"][0]["content"] = follow_up_prompt
@@ -197,19 +240,19 @@ class ConversationMemory:
             session = self.sessions[thread_id]
             if (datetime.now() - session["last_active"]) > timedelta(hours=CONFIG["MEMORY_DURATION"]):
                 del self.sessions[thread_id]
-                logger.info(f"Cleaned up expired session: {thread_id}")
+                logger.info(f"清理过期会话: {thread_id}")
 
         self.last_cleanup = datetime.now()
 
-# Initialize memory system
+# 初始化记忆系统
 memory = ConversationMemory()
 
-# ===== GLOBAL CONSTANTS =====
-DISCLAIMER = "💬 *Remember: I'm an AI guide, not a licensed therapist. For clinical support, consult a professional*"
+# ===== 全局常量 =====
+DISCLAIMER = "💬 *记住：我是AI向导，不是持证治疗师。如需临床支持，请咨询专业人士*"
 
-# ===== MULTILINGUAL SAFETY PROTOCOLS =====
+# ===== 多语言安全协议 =====
 def check_safety(message: str) -> bool:
-    """Enhanced safety check with multilingual support"""
+    """增强的多语言安全检查"""
     message_lower = message.lower()
     return not any(
         flag in message_lower or 
@@ -218,46 +261,46 @@ def check_safety(message: str) -> bool:
     )
 
 def crisis_response(lang: str = 'en') -> str:
-    """Return crisis resources in user's language"""
+    """返回用户语言的危机资源"""
     if lang in ERROR_TRANSLATIONS:
         return ERROR_TRANSLATIONS[lang]['crisis']
     return (
-        "🚨 I'm concerned about what you're sharing. Please reach out immediately:\n"
-        "• Crisis Text Line: Text HOME to 741741\n"
-        "• International Help: https://www.iasp.info/resources/Crisis_Centres/\n"
-        "• Your local emergency services"
+        "🚨 我担心你分享的内容。请立即联系：\n"
+        "• 危机短信热线：发送HOME到741741\n"
+        "• 国际帮助：https://www.iasp.info/resources/Crisis_Centres/\n"
+        "• 当地紧急服务"
     )
 
-# ===== TRANSLATION HELPER =====
+# ===== 翻译辅助 =====
 def translate_to_english(text: str) -> str:
-    """Simple keyword translation for safety checks"""
+    """安全检查的简单关键词翻译"""
     translations = {
-        # Spanish
+        # 西班牙语
         "suicidio": "suicide",
         "suicidarse": "suicide",
         "autolesión": "self-harm",
         "matarme": "kill myself",
         "acabar con todo": "end it all",
-        # French
+        # 法语
         "suicide": "suicide",
         "me tuer": "kill myself",
         "automutilation": "self-harm",
         "tout arrêter": "end it all",
-        # German
+        # 德语
         "selbstmord": "suicide",
         "selbstverletzung": "self-harm",
         "mich umbringen": "kill myself",
         "alles beenden": "end it all",
-        # Add more languages as needed
+        # 添加更多语言...
     }
     for foreign, english in translations.items():
         text = text.replace(foreign, english)
     return text
 
-# ===== MULTILINGUAL RESPONSE GENERATION =====
+# ===== 多语言响应生成 =====
 def get_therapeutic_response(history: list, detected_lang: str) -> str:
     try:
-        # Build Mixtral-compatible prompt
+        # 构建Mixtral兼容提示
         prompt = ""
         for msg in history:
             if msg["role"] == "system":
@@ -267,16 +310,16 @@ def get_therapeutic_response(history: list, detected_lang: str) -> str:
             else:
                 prompt += f"{msg['content']} </s><s>"
 
-        # Add explicit language instruction for non-English
+        # 为非英语添加明确语言指令
         if detected_lang != 'en':
             prompt += f"<s>[INST] Respond exclusively in {detected_lang} without using English. [/INST]"
 
-        # Prepare API request
+        # 准备API请求
         headers = {"Authorization": f"Bearer {CONFIG['HF_API_KEY']}"}
         payload = {
             "inputs": prompt,
             "parameters": {
-                "max_new_tokens": 450,  # Increased for multilingual responses
+                "max_new_tokens": 450,  # 为多语言响应增加
                 "temperature": 0.82,
                 "top_p": 0.90,
                 "repetition_penalty": 1.12,
@@ -284,61 +327,73 @@ def get_therapeutic_response(history: list, detected_lang: str) -> str:
             }
         }
 
-        # Send request with detailed logging
-        logger.info(f"Sending request to model: {CONFIG['MODEL']}")
+        # 发送请求并详细记录
+        logger.info(f"发送请求到模型: {CONFIG['MODEL']}")
         start_time = time.time()
-        response = requests.post(
-            f"https://api-inference.huggingface.co/models/{CONFIG['MODEL']}",
-            headers=headers,
-            json=payload,
-            timeout=90  # Increased timeout
-        )
+        
+        # 使用更可靠的请求方法
+        try:
+            response = requests.post(
+                f"https://api-inference.huggingface.co/models/{CONFIG['MODEL']}",
+                headers=headers,
+                json=payload,
+                timeout=90
+            )
+        except requests.exceptions.Timeout:
+            logger.warning("API请求超时，重试中...")
+            response = requests.post(
+                f"https://api-inference.huggingface.co/models/{CONFIG['MODEL']}",
+                headers=headers,
+                json=payload,
+                timeout=120
+            )
+        
         elapsed = time.time() - start_time
-        logger.info(f"Received response in {elapsed:.2f}s - Status: {response.status_code}")
+        logger.info(f"收到响应时间: {elapsed:.2f}s - 状态: {response.status_code}")
 
-        # Process response
+        # 处理响应
         if response.status_code == 200:
             try:
                 raw_response = response.json()[0]['generated_text'].strip()
 
-                # Clean up any leftover tags
+                # 清理残留标签
                 raw_response = raw_response.replace('</s>', '').replace('<s>', '').strip()
 
-                # Skip English empathy markers for non-English
+                # 非英语跳过英语共情标记
                 if detected_lang == 'en' and random.random() > 0.6:
                     human_element = random.choice(EMPATHY_MARKERS) + " "
                     return human_element + raw_response
                 return raw_response
 
             except (KeyError, IndexError) as e:
-                logger.error(f"Response parsing error: {str(e)} - JSON: {response.text}")
-                # Return translated error message
+                logger.error(f"响应解析错误: {str(e)} - JSON: {response.text}")
+                # 返回翻译的错误消息
                 if detected_lang in ERROR_TRANSLATIONS:
                     return ERROR_TRANSLATIONS[detected_lang]['processing']
-                return "🤔 I need a moment to process that. Could you rephrase or add more context?"
+                return "🤔 我需要一点时间处理。你能重新表述或添加上下文吗？"
         else:
-            logger.error(f"API Error: Status {response.status_code}, Response: {response.text}")
+            logger.error(f"API错误: 状态 {response.status_code}, 响应: {response.text}")
             if detected_lang in ERROR_TRANSLATIONS:
                 return ERROR_TRANSLATIONS[detected_lang]['processing']
-            return "🤔 I need a moment to process that. Could you rephrase or add more context?"
+            return "🤔 我需要一点时间处理。你能重新表述或添加上下文吗？"
 
     except Exception as e:
-        logger.error(f"Response error: {str(e)}", exc_info=True)
+        logger.error(f"响应错误: {str(e)}", exc_info=True)
         if detected_lang in ERROR_TRANSLATIONS:
             return ERROR_TRANSLATIONS[detected_lang]['error']
-        return "⚠️ My thoughts are tangled right now. Could we try again?"
+        return "⚠️ 我的思绪现在有些混乱。我们能再试一次吗？"
 
-# ===== DISCORD EVENT HANDLERS =====
+# ===== Discord 事件处理器 =====
 @bot.event
 async def on_ready():
-    logger.info(f"✅ Logged in as {bot.user}")
+    logger.info(f"✅ 登录为 {bot.user}")
     try:
         server_id = discord.Object(id=CONFIG["SERVER_ID"])
         synced = await tree.sync(guild=server_id)
-        logger.info(f"🌿 Synced {len(synced)} commands")
+        logger.info(f"🌿 同步 {len(synced)} 个命令")
     except Exception as e:
-        logger.error(f"❌ Command sync failed: {str(e)}")
-    logger.info("🌿 Bot is ready!")
+        logger.error(f"❌ 命令同步失败: {str(e)}")
+    logger.info("🌿 机器人已就绪！")
 
 @bot.event
 async def on_message(message):
@@ -354,99 +409,111 @@ async def on_message(message):
     if not session:
         return
 
-    # Get detected language from session
+    # 从会话获取检测到的语言
     detected_lang = session.get('language', 'en')
 
-    # Enhanced safety check
+    # 增强安全检查
     if not check_safety(message.content):
         await thread.send(crisis_response(detected_lang))
         return
 
-    # Add user message to history
+    # 添加用户消息到历史
     session["history"].append({"role": "user", "content": message.content})
 
-    # Show typing indicator
+    # 显示输入指示器
     async with thread.typing():
-        # Get AI response with language context
+        # 获取带语言上下文的AI响应
         response = get_therapeutic_response(session["history"], detected_lang)
 
-        # Add to history and memory
+        # 添加到历史和记忆
         session["history"].append({"role": "assistant", "content": response})
         memory.add_exchange(thread.id, message.content, response)
 
-        # Send response
+        # 发送响应
         await thread.send(f"**Sol:** {response}\n\n{DISCLAIMER}")
 
-@tree.command(name="sol", description="Start therapy session")
+@tree.command(name="sol", description="开始治疗会话")
 async def sol_command(interaction: discord.Interaction, issue: str):
     try:
-        # Initial safety check
+        # 初始安全检查
         if not check_safety(issue):
             await interaction.response.send_message(crisis_response('en'), ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
 
-        # Create private therapy thread
+        # 创建私密治疗线程
         thread = await interaction.channel.create_thread(
-            name=f"🌱 {interaction.user.name}'s Therapy Space",
+            name=f"🌱 {interaction.user.name}的治疗空间",
             type=discord.ChannelType.private_thread,
             auto_archive_duration=1440
         )
 
-        # Initialize conversation
+        # 初始化对话
         memory.start_session(thread.id, issue)
         session = memory.get_session(thread.id)
         detected_lang = session.get('language', 'en')
 
-        # Show typing indicator
+        # 显示输入指示器
         async with thread.typing():
-            # Get AI response with language context
+            # 获取带语言上下文的AI响应
             response = get_therapeutic_response(session["history"], detected_lang)
             session["history"].append({"role": "assistant", "content": response})
             memory.add_exchange(thread.id, issue, response)
 
-            # Send initial response
+            # 发送初始响应
             await thread.send(
                 f"**Sol:** {response}\n\n"
                 f"{DISCLAIMER}\n\n"
-                "💬 **Simply reply here to continue our conversation naturally**"
+                "💬 **直接在这里回复即可继续我们的自然对话**"
             )
 
         await interaction.followup.send(
-            f"🌿 Your safe space is ready in {thread.mention}!\n"
-            "I'm here when you're ready to talk.",
+            f"🌿 你的安全空间已在 {thread.mention} 准备就绪！\n"
+            "当你准备好交谈时，我就在这里。",
             ephemeral=True
         )
 
     except Exception as e:
-        logger.error(f"Command error: {str(e)}", exc_info=True)
-        await interaction.followup.send(f"🌧️ Something went wrong: {str(e)}", ephemeral=True)
-    import os
-    import threading
-    from flask import Flask
+        logger.error(f"命令错误: {str(e)}", exc_info=True)
+        await interaction.followup.send(f"🌧️ 出了点问题: {str(e)}", ephemeral=True)
 
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Sol-CBT Bot Running", 200
-
+# ===== 主启动逻辑 =====
 def run_flask():
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 7860)))
+    """在单独线程中运行Flask服务器"""
+    port = int(os.getenv('PORT', 7860))
+    logger.info(f"启动Flask服务器在端口 {port}")
+    app.run(host='0.0.0.0', port=port)
 
-# 在 bot.run() 前添加
-flask_thread = threading.Thread(target=run_flask)
-flask_thread.daemon = True
-flask_thread.start()
-
-# 启动 Discord Bot
-bot.run(os.getenv('DISCORD_TOKEN'))
-        
-logger.info("=== BOT STARTING ===")
-# ===== START BOT =====
 if __name__ == "__main__":
-    logger.info("=== STARTING MULTILINGUAL SOL THERAPY BOT ===")
-    logger.info(f"Using Model: {CONFIG['MODEL']}")
-    logger.info(f"Supported Languages: {', '.join(CONFIG['SUPPORTED_LANGUAGES'])}")
-    bot.run(CONFIG["DISCORD_TOKEN"])
+    logger.info("=== 启动多语言SOL治疗机器人 ===")
+    logger.info(f"使用模型: {CONFIG['MODEL']}")
+    logger.info(f"支持语言: {', '.join(CONFIG['SUPPORTED_LANGUAGES']}")
+    
+    # 验证环境变量
+    required_envs = ['DISCORD_TOKEN', 'HF_API_TOKEN', 'SERVER_ID']
+    missing = [env for env in required_envs if not os.getenv(env)]
+    
+    if missing:
+        logger.error(f"缺少关键环境变量: {', '.join(missing)}")
+        sys.exit(1)
+    
+    # 启动keep-alive线程
+    keep_alive_thread = threading.Thread(target=keep_alive)
+    keep_alive_thread.daemon = True
+    keep_alive_thread.start()
+    logger.info("Keep-alive线程已启动")
+    
+    # 启动Flask服务器线程
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    logger.info("Flask服务器线程已启动")
+    
+    # 启动Discord机器人
+    try:
+        bot.run(CONFIG["DISCORD_TOKEN"])
+    except Exception as e:
+        logger.critical(f"机器人启动失败: {str(e)}", exc_info=True)
+        # 在Hugging Face Spaces中记录错误后退出
+        sys.exit(1)
