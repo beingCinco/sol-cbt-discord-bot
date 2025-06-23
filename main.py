@@ -7,6 +7,16 @@ import logging
 from datetime import datetime, timedelta
 import random
 import langdetect
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('debug.log')
+    ]
+)
+logger = logging.getLogger('discord')
 
 # ===== LANGUAGE CONFIGURATION =====
 LANGUAGE_INSTRUCTION = "\n\nRespond in the same language as the user's message."
@@ -412,7 +422,8 @@ async def sol_command(interaction: discord.Interaction, issue: str):
     except Exception as e:
         logger.error(f"Command error: {str(e)}", exc_info=True)
         await interaction.followup.send(f"🌧️ Something went wrong: {str(e)}", ephemeral=True)
-
+        
+logger.info("=== BOT STARTING ===")
 # ===== START BOT =====
 if __name__ == "__main__":
     logger.info("=== STARTING MULTILINGUAL SOL THERAPY BOT ===")
