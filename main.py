@@ -4,7 +4,6 @@ import logging
 import asyncio
 import threading
 from discord import app_commands
-from flask import Flask
 
 # 配置日志
 logging.basicConfig(
@@ -13,9 +12,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger('sol-therapy-bot')
-
-# 创建 Flask 应用
-app = Flask(__name__)
 
 @app.route('/')
 def home():
