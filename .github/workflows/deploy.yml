@@ -11,15 +11,17 @@ jobs:
       with:
         python-version: "3.10"
         
-    - name: Cache dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-        
     - name: Install dependencies
       run: |
+        python -m pip install --upgrade pip
         pip install -r requirements.txt
+        
+    # 添加依赖验证步骤
+    - name: Verify dependencies
+      run: |
+        pip list
+        python -c "import torch; print(f'TORCH VERSION: {torch.__version__}')"
+        python -c "import discord; print(f'DISCORD.PY VERSION: {discord.__version__}')"
         
     - name: Run Bot
       env:
