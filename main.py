@@ -20,10 +20,10 @@ try:
     import gradio
     import transformers
     import torch
-    print("✅ 关键依赖已安装")
+    logger.info("✅ 关键依赖已安装")
 except ImportError as e:
-    print(f"❌ 缺少关键模块: {e}")
-    print("### 已安装的包 ###")
+    logger.error(f"❌ 缺少关键模块: {e}")
+    logger.info("### 已安装的包 ###")
     subprocess.run(["pip", "list"])
     sys.exit(1)
 
