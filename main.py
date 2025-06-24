@@ -7,9 +7,9 @@ try:
 except ImportError as e:
     print(f"❌ Missing module: {e}")
     print("Installed packages:")
-   import subprocess
-print("### Installed packages ###")
-subprocess.run(["pip", "list"])
+import subprocess
+ print("### Installed packages ###")
+ subprocess.run(["pip", "list"])
     sys.exit(1)
 import os
 import discord
