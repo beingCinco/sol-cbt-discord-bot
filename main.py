@@ -88,7 +88,10 @@ if __name__ == "__main__":
     missing_envs = [env for env in required_envs if not os.getenv(env)]
     
     if missing_envs:
-        logger.critical(f"缺少环境变量: {', '.join(missing_envs)}")
+        logger.critical(f"❌ 缺少环境变量: {', '.join(missing_envs)}")
+        logger.critical("请确保设置了以下环境变量:")
+        for env in required_envs:
+            logger.critical(f" - {env}")
         sys.exit(1)
     
     logger.info("=== 启动 SOL 治疗机器人 ===")
@@ -96,11 +99,19 @@ if __name__ == "__main__":
     # 启动 Discord 机器人
     try:
         bot_token = os.getenv('DISCORD_TOKEN')
+        server_id = os.getenv('SERVER_ID')
+        
         if not bot_token:
             logger.critical("❌ 错误: DISCORD_TOKEN 环境变量未设置")
             sys.exit(1)
             
+        if not server_id:
+            logger.critical("❌ 错误: SERVER_ID 环境变量未设置")
+            sys.exit(1)
+            
         logger.info(f"🤖 使用令牌启动 Discord 机器人: {bot_token[:5]}...{bot_token[-5:]}")
+        logger.info(f"🏠 服务器 ID: {server_id}")
+        
         bot.run(bot_token)
     except discord.LoginFailure:
         logger.critical("Discord 登录失败: 令牌可能无效")
