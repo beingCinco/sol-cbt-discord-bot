@@ -1,3 +1,14 @@
+import sys
+try:
+    import discord
+    import gradio
+    import transformers
+    print("✅ All required modules installed")
+except ImportError as e:
+    print(f"❌ Missing module: {e}")
+    print("Installed packages:")
+    !pip list  # 仅用于调试
+    sys.exit(1)
 import os
 import discord
 import logging
