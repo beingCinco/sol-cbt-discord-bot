@@ -1,85 +1,28 @@
-name: Deploy to Hugging Face Space
-
-on:
-  push:
-    branches: [main]
-
+name: Deploy Bot
+on: [push]
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install huggingface_hub
-
-      - name: Configure Hugging Face CLI
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          huggingface-cli login --token $HF_TOKEN
-
-      - name: Prepare Dockerfile
-        run: |
-          cat << EOF > Dockerfile
-          FROM python:3.10-slim
-          
-          WORKDIR /app
-          
-          COPY requirements.txt .
-          RUN pip install --no-cache-dir -r requirements.txt
-          
-          COPY . .
-          
-          CMD ["python", "main.py"]
-          EOF
-          
-          cat Dockerfile
-
-      - name: Deploy to Hugging Face Space
-        env:
-          HF_USERNAME: ${{ secrets.HF_USERNAME }}
-          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          HF_API_TOKEN: ${{ secrets.HF_API_TOKEN }}
-          SERVER_ID: ${{ secrets.SERVER_ID }}
-        run: |
-          # 设置空间名称
-          SPACE_NAME="$HF_USERNAME/solcbt-therapy-bot"
-          
-          # 创建或更新Space
-          huggingface-cli repo create $SPACE_NAME --type space --space-sdk docker --exist-ok
-          
-          # 上传必要文件
-          huggingface-cli upload $SPACE_NAME \
-            main.py \
-            requirements.txt \
-            Dockerfile \
-            --repo-type space \
-            --commit-message "Deploy from GitHub Actions"
-          
-          # 设置环境变量
-          huggingface-cli space config set $SPACE_NAME \
-            --env "DISCORD_TOKEN=$DISCORD_TOKEN" \
-            --env "HF_API_TOKEN=$HF_API_TOKEN" \
-            --env "SERVER_ID=$SERVER_ID"
-          
-          # 重启空间
-          huggingface-cli space restart $SPACE_NAME
-          
-          echo "Deployed to: https://huggingface.co/spaces/$SPACE_NAME"
-          - name: Cache dependencies
-  
-          uses: actions/cache@v3
-          with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-      ${{ runner.os }}-pip-
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        
+    - name: Run Bot
+      env:
+        DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: python main.py
