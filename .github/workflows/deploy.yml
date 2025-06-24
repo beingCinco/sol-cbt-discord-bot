@@ -75,3 +75,11 @@ jobs:
           huggingface-cli space restart $SPACE_NAME
           
           echo "Deployed to: https://huggingface.co/spaces/$SPACE_NAME"
+          - name: Cache dependencies
+  
+          uses: actions/cache@v3
+          with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+      ${{ runner.os }}-pip-
