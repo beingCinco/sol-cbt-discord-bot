@@ -1,22 +1,11 @@
 import sys
-try:
-    import discord
-    import gradio
-    import transformers
-    print("✅ All required modules installed")
-except ImportError as e:
-    print(f"❌ Missing module: {e}")
-    print("Installed packages:")
-import subprocess
-    print("### Installed packages ###")
-    subprocess.run(["pip", "list"])
-    sys.exit(1)
 import os
 import discord
 import logging
 import asyncio
 import threading
 from discord import app_commands
+import subprocess
 
 # 配置日志
 logging.basicConfig(
@@ -26,13 +15,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger('sol-therapy-bot')
 
-@app.route('/')
-def home():
-    return "Sol-CBT Bot Running", 200
-
-@app.route('/health')
-def health_check():
-    return "OK", 200
+# 调试：检查关键模块是否存在
+try:
+    import gradio
+    import transformers
+    import torch
+    print("✅ 关键依赖已安装")
+except ImportError as e:
+    print(f"❌ 缺少关键模块: {e}")
+    print("### 已安装的包 ###")
+    subprocess.run(["pip", "list"])
+    sys.exit(1)
 
 # Discord 配置
 intents = discord.Intents.default()
@@ -89,11 +82,6 @@ async def on_message(message):
         except Exception as e:
             logger.error(f"消息处理错误: {str(e)}")
 
-def run_flask():
-    port = int(os.getenv('PORT', 7860))
-    logger.info(f"启动 Flask 服务器在端口 {port}")
-    app.run(host='0.0.0.0', port=port)
-
 if __name__ == "__main__":
     # 验证环境变量
     required_envs = ['DISCORD_TOKEN', 'SERVER_ID']
@@ -101,17 +89,19 @@ if __name__ == "__main__":
     
     if missing_envs:
         logger.critical(f"缺少环境变量: {', '.join(missing_envs)}")
-        exit(1)
+        sys.exit(1)
     
     logger.info("=== 启动 SOL 治疗机器人 ===")
     
-    # 启动 Flask 线程
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    
     # 启动 Discord 机器人
     try:
-        bot.run(os.getenv('DISCORD_TOKEN'))
+        bot_token = os.getenv('DISCORD_TOKEN')
+        if not bot_token:
+            logger.critical("❌ 错误: DISCORD_TOKEN 环境变量未设置")
+            sys.exit(1)
+            
+        logger.info(f"🤖 使用令牌启动 Discord 机器人: {bot_token[:5]}...{bot_token[-5:]}")
+        bot.run(bot_token)
     except discord.LoginFailure:
         logger.critical("Discord 登录失败: 令牌可能无效")
     except Exception as e:
