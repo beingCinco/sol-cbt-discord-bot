@@ -16,7 +16,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    # 添加依赖验证步骤
     - name: Verify dependencies
       run: |
         pip list
@@ -27,4 +26,5 @@ jobs:
       env:
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        SERVER_ID: ${{ secrets.SERVER_ID }}  
       run: python main.py
