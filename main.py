@@ -1,119 +1,96 @@
-import sys
-import os
 import discord
+from discord.ext import commands, tasks
+from huggingface_hub import InferenceClient
+import os
+from dotenv import load_dotenv
+from cachetools import TTLCache
 import logging
+from asyncio import Queue
 import asyncio
-import threading
-from discord import app_commands
-import subprocess
 
-# 配置日志
+# 设置日志
 logging.basicConfig(
+    filename="bot.log",
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger('sol-therapy-bot')
 
-# 调试：检查关键模块是否存在
-try:
-    import gradio
-    import transformers
-    import torch
-    logger.info("✅ 关键依赖已安装")
-except ImportError as e:
-    logger.error(f"❌ 缺少关键模块: {e}")
-    logger.info("### 已安装的包 ###")
-    subprocess.run(["pip", "list"])
-    sys.exit(1)
+# 加载环境变量
+load_dotenv()
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
-# Discord 配置
-intents = discord.Intents.default()
-intents.message_content = True
-intents.messages = True
+# 验证环境变量
+if not DISCORD_TOKEN or not HUGGINGFACE_API_KEY:
+    logging.error("缺少 DISCORD_TOKEN 或 HUGGINGFACE_API_KEY")
+    raise ValueError("缺少 DISCORD_TOKEN 或 HUGGINGFACE_API_KEY")
 
-bot = discord.Client(intents=intents)
-tree = app_commands.CommandTree(bot)
+# 初始化机器人和 API 客户端
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+client = InferenceClient(model="mistralai/Mixtral-8x7B-Instruct-v0.1", token=HUGGINGFACE_API_KEY)
+cache = TTLCache(maxsize=1000, ttl=3600)  # 缓存 1 小时
+request_queue = Queue()
 
-# 确保立即响应命令
-@tree.command(name="sol", description="开始治疗会话")
-async def sol_command(interaction: discord.Interaction):
-    try:
-        # 立即响应以避免超时
-        await interaction.response.defer(ephemeral=True)
-        
-        # 模拟处理时间
-        await asyncio.sleep(1)
-        
-        # 发送实际响应
-        await interaction.followup.send("🌿 你好！这是 Sol-CBT 治疗机器人的响应")
-    except Exception as e:
-        logger.error(f"命令处理错误: {str(e)}")
-        await interaction.followup.send("⚠️ 处理命令时出错，请稍后再试")
+# 异步请求处理
+async def process_requests():
+    while True:
+        ctx, user_input = await request_queue.get()
+        try:
+            if user_input in cache:
+                await ctx.send(cache[user_input])
+                logging.info(f"用户 {ctx.author.id} 使用缓存响应：{user_input}")
+                request_queue.task_done()
+                continue
 
+            prompt = f"""
+            你是一个经过认知行为疗法（CBT）训练的心理咨询师。用户表达了以下情绪或问题：{user_input}。
+            请按照以下步骤回应：
+            1. 共情：表达对用户感受的理解。
+            2. 识别：指出可能的负面思维模式。
+            3. 挑战：提出质疑负面思维的证据。
+            4. 替代：建议更积极的思维方式。
+            回答简洁，语气温暖，控制在 150 字以内。
+            """
+            response = client.text_generation(
+                prompt=prompt,
+                max_new_tokens=150,
+                temperature=0.7
+            )
+            cache[user_input] = response
+            await ctx.send(response)
+            logging.info(f"用户 {ctx.author.id} 输入：{user_input}，响应：{response}")
+        except Exception as e:
+            await ctx.send("抱歉，处理时出错，请稍后再试！")
+            logging.error(f"处理用户 {ctx.author.id} 输入 {user_input} 时出错：{e}")
+        request_queue.task_done()
+
+# 启动时事件
 @bot.event
 async def on_ready():
-    logger.info(f"✅ 已登录为 {bot.user}")
-    try:
-        # 获取服务器 ID
-        server_id = int(os.getenv('SERVER_ID'))
-        server = discord.Object(id=server_id)
-        
-        # 同步命令
-        await tree.sync(guild=server)
-        logger.info(f"🌿 已同步命令到服务器 {server_id}")
-    except Exception as e:
-        logger.error(f"❌ 命令同步失败: {str(e)}")
+    print(f"{bot.user} 已上线！")
+    logging.info(f"{bot.user} 已上线！")
+    asyncio.create_task(process_requests())  # 启动请求处理
 
+# CBT 指令
+@bot.command()
+@commands.cooldown(1, 60, commands.BucketType.user)  # 每用户每分钟 1 次
+async def cbt(ctx, *, user_input):
+    await request_queue.put((ctx, user_input))
+    logging.info(f"用户 {ctx.author.id} 发起 CBT 请求：{user_input}")
+
+# 保持活跃（防止 Space 休眠）
+@tasks.loop(minutes=20)
+async def keep_alive():
+    logging.info("保持 Space 活跃")
+
+# 错误处理
 @bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-    
-    # 确保机器人被提及时才响应
-    if bot.user.mentioned_in(message):
-        try:
-            # 发送打字指示器
-            async with message.channel.typing():
-                await asyncio.sleep(1)  # 模拟处理时间
-                
-            # 发送响应
-            await message.reply(f"你好 {message.author.mention}! 我是 Sol-CBT 治疗机器人，随时为您服务 🌱")
-        except Exception as e:
-            logger.error(f"消息处理错误: {str(e)}")
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"请等待 {int(error.retry_after)} 秒后再试！")
+    else:
+        await ctx.send("发生错误，请稍后再试！")
+        logging.error(f"命令错误：{error}")
 
-if __name__ == "__main__":
-    # 验证环境变量
-    required_envs = ['DISCORD_TOKEN', 'SERVER_ID']
-    missing_envs = [env for env in required_envs if not os.getenv(env)]
-    
-    if missing_envs:
-        logger.critical(f"❌ 缺少环境变量: {', '.join(missing_envs)}")
-        logger.critical("请确保设置了以下环境变量:")
-        for env in required_envs:
-            logger.critical(f" - {env}")
-        sys.exit(1)
-    
-    logger.info("=== 启动 SOL 治疗机器人 ===")
-    
-    # 启动 Discord 机器人
-    try:
-        bot_token = os.getenv('DISCORD_TOKEN')
-        server_id = os.getenv('SERVER_ID')
-        
-        if not bot_token:
-            logger.critical("❌ 错误: DISCORD_TOKEN 环境变量未设置")
-            sys.exit(1)
-            
-        if not server_id:
-            logger.critical("❌ 错误: SERVER_ID 环境变量未设置")
-            sys.exit(1)
-            
-        logger.info(f"🤖 使用令牌启动 Discord 机器人: {bot_token[:5]}...{bot_token[-5:]}")
-        logger.info(f"🏠 服务器 ID: {server_id}")
-        
-        bot.run(bot_token)
-    except discord.LoginFailure:
-        logger.critical("Discord 登录失败: 令牌可能无效")
-    except Exception as e:
-        logger.critical(f"机器人启动失败: {str(e)}")
+# 启动机器人
+bot.run(DISCORD_TOKEN)
