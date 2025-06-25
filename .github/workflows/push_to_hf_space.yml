@@ -23,9 +23,11 @@ jobs:
         run: |
           echo "DISCORD_TOKEN is set: ${DISCORD_TOKEN:+set}"
           echo "HUGGINGFACE_API_KEY is set: ${HUGGINGFACE_API_KEY:+set}"
+          echo "HF_TOKEN is set: ${HF_TOKEN:+set}"
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
       - name: Run tests
         run: python main.py
         env:
