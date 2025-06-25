@@ -7,12 +7,13 @@ from cachetools import TTLCache
 import logging
 from asyncio import Queue
 import asyncio
+import sys
 
-# 设置日志
+# 设置日志到 stdout
 logging.basicConfig(
-    filename="bot.log",
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
 # 加载环境变量
