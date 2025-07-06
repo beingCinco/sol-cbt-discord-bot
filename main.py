@@ -1,45 +1,54 @@
+import os
+import logging
+import sys
 import discord
 from discord.ext import commands, tasks
 from huggingface_hub import InferenceClient
-import os
-from dotenv import load_dotenv
 from cachetools import TTLCache
-import logging
 from asyncio import Queue
 import asyncio
-import sys
+from requests.exceptions import RequestException
 
-# 设置日志到 stdout
+# Configure logging to stdout
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
+logger = logging.getLogger(__name__)
 
-# 加载环境变量
-load_dotenv()
+# Load environment variables
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
-# 验证环境变量
+# Debug environment variables
+logger.info(f"DISCORD_TOKEN is set: {'set' if DISCORD_TOKEN else 'unset'}")
+logger.info(f"HUGGINGFACE_API_KEY is set: {'set' if HUGGINGFACE_API_KEY else 'unset'}")
+
+# Validate environment variables
 if not DISCORD_TOKEN or not HUGGINGFACE_API_KEY:
-    logging.error("缺少 DISCORD_TOKEN 或 HUGGINGFACE_API_KEY")
+    logger.error("缺少 DISCORD_TOKEN 或 HUGGINGFACE_API_KEY")
+    if os.getenv("CI") == "true":
+        logger.info("Running in CI environment, skipping bot startup")
+        sys.exit(0)  # Exit gracefully in CI
     raise ValueError("缺少 DISCORD_TOKEN 或 HUGGINGFACE_API_KEY")
 
-# 初始化机器人和 API 客户端
-bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+# Initialize bot and API client
+intents = discord.Intents.default()
+intents.message_content = True  # Enable message content intent
+bot = commands.Bot(command_prefix="!", intents=intents)
 client = InferenceClient(model="mistralai/Mixtral-8x7B-Instruct-v0.1", token=HUGGINGFACE_API_KEY)
-cache = TTLCache(maxsize=1000, ttl=3600)  # 缓存 1 小时
+cache = TTLCache(maxsize=2000, ttl=3600)  # Increased cache for 500 users
 request_queue = Queue()
 
-# 异步请求处理
+# Asynchronous request processing
 async def process_requests():
     while True:
         ctx, user_input = await request_queue.get()
         try:
             if user_input in cache:
                 await ctx.send(cache[user_input])
-                logging.info(f"用户 {ctx.author.id} 使用缓存响应：{user_input}")
+                logger.info(f"用户 {ctx.author.id} 使用缓存响应：{user_input}")
                 request_queue.task_done()
                 continue
 
@@ -52,46 +61,59 @@ async def process_requests():
             4. 替代：建议更积极的思维方式。
             回答简洁，语气温暖，控制在 150 字以内。
             """
-            response = client.text_generation(
-                prompt=prompt,
-                max_new_tokens=150,
-                temperature=0.7
-            )
-            cache[user_input] = response
-            await ctx.send(response)
-            logging.info(f"用户 {ctx.author.id} 输入：{user_input}，响应：{response}")
+            for attempt in range(3):  # Retry logic for API calls
+                try:
+                    response = client.text_generation(
+                        prompt=prompt,
+                        max_new_tokens=150,
+                        temperature=0.7
+                    )
+                    cache[user_input] = response
+                    await ctx.send(response)
+                    logger.info(f"用户 {ctx.author.id} 输入：{user_input}，响应：{response}")
+                    break
+                except RequestException as e:
+                    if attempt == 2:
+                        await ctx.send("API 错误，请稍后再试！")
+                        logger.error(f"API call failed for 用户 {ctx.author.id}: {e}")
+                        break
+                    await asyncio.sleep(2)
         except Exception as e:
             await ctx.send("抱歉，处理时出错，请稍后再试！")
-            logging.error(f"处理用户 {ctx.author.id} 输入 {user_input} 时出错：{e}")
+            logger.error(f"处理用户 {ctx.author.id} 输入 {user_input} 时出错：{e}")
         request_queue.task_done()
 
-# 启动时事件
+# Bot ready event
 @bot.event
 async def on_ready():
-    print(f"{bot.user} 已上线！")
-    logging.info(f"{bot.user} 已上线！")
-    asyncio.create_task(process_requests())  # 启动请求处理
+    logger.info(f"{bot.user} 已上线！")
+    asyncio.create_task(process_requests())  # Start request processing
 
-# CBT 指令
+# CBT command with cooldown
 @bot.command()
-@commands.cooldown(1, 60, commands.BucketType.user)  # 每用户每分钟 1 次
+@commands.cooldown(1, 60, commands.BucketType.user)  # 1 call per minute per user
 async def cbt(ctx, *, user_input):
     await request_queue.put((ctx, user_input))
-    logging.info(f"用户 {ctx.author.id} 发起 CBT 请求：{user_input}")
+    logger.info(f"用户 {ctx.author.id} 发起 CBT 请求：{user_input}")
 
-# 保持活跃（防止 Space 休眠）
+# Keep-alive task to prevent Space sleep
 @tasks.loop(minutes=20)
 async def keep_alive():
-    logging.info("保持 Space 活跃")
+    logger.info("保持 Space 活跃")
 
-# 错误处理
+# Error handling
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
         await ctx.send(f"请等待 {int(error.retry_after)} 秒后再试！")
     else:
         await ctx.send("发生错误，请稍后再试！")
-        logging.error(f"命令错误：{error}")
+        logger.error(f"命令错误：{error}")
 
-# 启动机器人
-bot.run(DISCORD_TOKEN)
+# Start bot (skip in CI)
+if os.getenv("CI") != "true":
+    keep_alive.start()  # Start keep-alive task
+    bot.run(DISCORD_TOKEN)
+else:
+    logger.info("CI environment detected, skipping bot.run")
+    sys.exit(0)
